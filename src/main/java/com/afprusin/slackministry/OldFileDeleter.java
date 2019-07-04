@@ -18,6 +18,7 @@ import java.util.concurrent.TimeUnit;
 public class OldFileDeleter {
 	private static final int SECONDS_IN_MONTH = 2592000;
 	private static final int MONTHS_BACK_TO_SAVE = 1;
+	private static final int API_HAMMER_WAIT_SECONDS = 2;
 
 	public static void main(String[] args) {
 		new OldFileDeleter().doStuff();
@@ -46,42 +47,61 @@ public class OldFileDeleter {
 	}
 
 	private void deleteFilesOlderThanOneMonth(String authToken) {
-		final int oneMonthAgo = getUnixSeconds() - (MONTHS_BACK_TO_SAVE * SECONDS_IN_MONTH);
+		final long oneMonthAgo = getUnixTimeInSeconds() - (MONTHS_BACK_TO_SAVE * SECONDS_IN_MONTH);
+		final List<File> files = getFilesBeforeDate(oneMonthAgo, authToken);
 
-		// This could definitely get stuck and be terrible
-		List<File> files = getFilesBeforeDate(oneMonthAgo, authToken);
-		while( ! files.isEmpty()) {
-			files.forEach(file -> attemptFileDelete(file, authToken));
-			files = getFilesBeforeDate(oneMonthAgo, authToken);
-		}
+		files.forEach(file -> attemptToDeleteFile(file, authToken));
 	}
 
-	private List<File> getFilesBeforeDate(int date, String authToken) {
-		FilesListResponse response = null;
+	private List<File> getFilesBeforeDate(long date, String authToken) {
+		List<File> files = new ArrayList<>();
+
+		// TODO: This is supposedly not the correct way to paginate through results from a ListFiles call
+		//  but this library does not seem to provide a URL to the next page (or a response metadata object)
 		try {
-			response = slack.methods().filesList(FilesListRequest.builder()
-					.tsTo(String.valueOf(date))
-					.token(authToken)
-					.build());
+			FilesListResponse response;
+			int page = 1;
+			Integer totalPages = null;
+			do {
+				response = slack.methods().filesList(
+						getRequestForFilesBeforeDate(date, authToken, page));
+
+				if (response == null || response.getFiles() == null || response.getFiles().isEmpty()) {
+					break;
+				}
+				if (totalPages == null) {
+					totalPages = response.getPaging().getPages();
+					System.out.println("Found " + response.getPaging().getTotal() + " files to delete");
+				}
+
+				files.addAll(response.getFiles());
+				page++;
+			} while (page <= totalPages);
 		} catch (IOException | SlackApiException e) {
 			e.printStackTrace();
-		}
-
-		List<File> files = new ArrayList<>();
-		if(response != null) {
-			files = response.getFiles();
 		}
 
 		return files;
 	}
 
-	private void attemptFileDelete(File file, String authToken) {
-		System.out.println("Attempting to delete: " + file.getName() + " : " + file.getId());
+	private FilesListRequest getRequestForFilesBeforeDate(long date, String authToken, int page) {
+		// TODO: Library does not provide a way to set 'show files hidden by limit', for Slack's 'tombstoned' files
+		//  when accounts go over their storage limit, the earliest files are hidden from API calls without this flag
+		return FilesListRequest.builder()
+				.tsTo(String.valueOf(date))
+				.token(authToken)
+				.page(page)
+				.build();
+	}
+
+
+	private void attemptToDeleteFile(File toDelete, String authToken) {
+		System.out.println("Attempting to delete: " + toDelete.getId() + " : " + toDelete.getName());
 		FilesDeleteResponse deleteResponse = null;
 		try {
 			deleteResponse = slack.methods().filesDelete(FilesDeleteRequest.builder()
 					.token(authToken)
-					.file(file.getId())
+					.file(toDelete.getId())
 					.build());
 		} catch (IOException | SlackApiException e) {
 			e.printStackTrace();
@@ -98,13 +118,13 @@ public class OldFileDeleter {
 			}
 		}
 		try {
-			TimeUnit.SECONDS.sleep(2);
+			TimeUnit.SECONDS.sleep(API_HAMMER_WAIT_SECONDS);
 		} catch (InterruptedException e) {
 			e.printStackTrace();
 		}
 	}
 
-	private int getUnixSeconds() {
-		return (int) (System.currentTimeMillis() / 1000L);
+	private long getUnixTimeInSeconds() {
+		return (System.currentTimeMillis() / 1000L);
 	}
 }
