@@ -1,0 +1,7 @@
+
+*.class
+.idea/workspace.xml
+.idea/vcs.xml
+.idea/misc.xml
+.idea/compiler.xml
+.idea/checkstyle-idea.xml
