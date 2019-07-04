@@ -96,7 +96,7 @@ public class OldFileDeleter {
 
 
 	private void attemptToDeleteFile(File toDelete, String authToken) {
-		System.out.println("Attempting to delete: " + toDelete.getId() + " : " + toDelete.getName());
+		System.out.print("Attempting to delete: " + toDelete.getId() + " : " + toDelete.getName() + "  ... ");
 		FilesDeleteResponse deleteResponse = null;
 		try {
 			deleteResponse = slack.methods().filesDelete(FilesDeleteRequest.builder()
